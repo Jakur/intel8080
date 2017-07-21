@@ -1,0 +1,6 @@
+[package]
+name = "intel_8080"
+version = "0.1.0"
+authors = ["Justin Kur"]
+
+[dependencies]
