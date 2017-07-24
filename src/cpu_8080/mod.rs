@@ -76,6 +76,10 @@ impl State8080 {
             int_enable: 0,
         }
     }
+    /*
+    Utility functions
+    */
+
     ///Returns true if the number of 1s in the given number is even, else false
     fn parity(number: u8) -> bool {
         number.count_ones() % 2 == 0
@@ -85,6 +89,22 @@ impl State8080 {
     pub fn advance(&mut self, value: u8) {
         self.pc += value as usize;
     }
+
+    fn get_hl(&self) -> u8 {
+        let significant_bits = (self.reg[5] as u16).wrapping_shl(4);
+        self.memory[(significant_bits + self.reg[6] as u16) as usize]
+    }
+
+    fn set_hl(&mut self, value: u8) {
+        let significant_bits = (self.reg[5] as u16).wrapping_shl(4);
+        self.memory[(significant_bits + self.reg[6] as u16) as usize] = value;
+    }
+
+    fn get_hl_index(&self) -> usize {
+        let significant_bits = (self.reg[5] as u16).wrapping_shl(4);
+        (significant_bits + self.reg[6] as u16) as usize
+    }
+
     /*
     8 bit arithmetic/logical instructions
     Functions ending with reg use values from the registers. Functions ending in hl use registers
@@ -210,16 +230,6 @@ impl State8080 {
     pub fn sub_reg(&mut self, reg_num: usize, use_carry: bool) {
         let number = self.reg[reg_num];
         self.sub(number, use_carry);
-    }
-
-    fn get_hl(&self) -> u8 {
-        let significant_bits = (self.reg[5] as u16).wrapping_shl(4);
-        self.memory[(significant_bits + self.reg[6] as u16) as usize]
-    }
-
-    fn set_hl(&mut self, value: u8) {
-        let significant_bits = (self.reg[5] as u16).wrapping_shl(4);
-        self.memory[(significant_bits + self.reg[6] as u16) as usize] = value;
     }
 
     fn set_logic_flags(&mut self, answer: u8) {
@@ -392,6 +402,12 @@ impl State8080 {
         self.reg[5] = self.memory[self.sp + 1];
         self.sp += 2;
     }
+    ///Pushes a 16-bit register pair onto the stack. The number supplied is the first in the pair
+    pub fn push_reg(&mut self, first: usize) {
+        let value1 = self.reg[first + 1];
+        let value2 = self.reg[first];
+        self.stack_push(value1, value2); //first is most significant
+    }
     ///Calls a subroutine by jumping to the given location in memory, but pushes the memory location
     /// after the call onto the stack, so it can be popped off when the subroutine has ended
     pub fn call(&mut self, least_sig: u8, most_sig: u8) {
@@ -403,6 +419,17 @@ impl State8080 {
     pub fn call_if(&mut self, least_sig: u8, most_sig: u8, f: fn(&State8080) -> bool) {
         if f(self) {
             self.call(least_sig, most_sig);
+        }
+    }
+    ///Returns from a subroutine call
+    pub fn ret(&mut self) {
+        self.stack_pop(); //Pop the memory location off the stack
+        self.pc = self.get_hl_index(); //and set pc to that location
+    }
+    ///Returns from a subroutine call if the condition function returns true
+    pub fn ret_if(&mut self, f: fn(&State8080) -> bool) {
+        if f(self) {
+            self.ret();
         }
     }
 
@@ -571,11 +598,19 @@ pub fn emulate(state: &mut State8080) {
         0xBD => state.cmp_reg(6),
         0xBE => state.cmp_hl(),
         0xBF => state.cmp_reg(0),
-        0xC2 => state.jump_if(second, third, if_zero),
+        0xC2 => state.jump_if(second, third, if_not_zero),
         0xC3 => state.jump(second, third),
-
+        0xC4 => state.call_if(second, third, if_not_zero),
+        0xC5 => state.push_reg(1),
         0xC6 => state.add(second, false),
+
+        0xC9 => state.ret(),
+        0xCA => state.jump_if(second, third, if_zero),
+        0xCB => state.jump(second, third), //Repeat of 0xC3, usage of this is not advised
+        0xCC => state.call_if(second, third, if_zero),
+        0xCD => state.call(second, third),
         0xCE => state.add(second, true),
+
         0xD6 => state.sub(second, false),
         0xDE => state.sub(second, true),
         0xE6 => state.log_and(second),
